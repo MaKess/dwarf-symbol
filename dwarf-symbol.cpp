@@ -82,6 +82,28 @@ class DwarfParser {
 		const void * const data;
 		const size_t size;
 		size_t offset;
+
+		enum DW_LNS : uint8_t {
+			DW_LNS_extended_op = 0,
+			DW_LNS_copy = 1,
+			DW_LNS_advance_pc = 2,
+			DW_LNS_advance_line = 3,
+			DW_LNS_set_file = 4,
+			DW_LNS_set_column = 5,
+			DW_LNS_negate_stmt = 6,
+			DW_LNS_set_basic_block = 7,
+			DW_LNS_const_add_pc = 8,
+			DW_LNS_fixed_advance_pc = 9,
+			DW_LNS_set_prologue_end = 10,
+			DW_LNS_set_epilogue_begin = 11,
+			DW_LNS_set_isa = 12,
+		};
+		enum DW_LNE : uint8_t {
+			DW_LNE_end_sequence = 1,
+			DW_LNE_set_address = 2,
+			DW_LNE_define_file = 3,
+			DW_LNE_set_discriminator = 4,
+		};
 };
 
 template<typename ElfHeader, typename SectionHeader, typename SymbolEntry>
@@ -335,52 +357,52 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 	while (offset < offset_start + total_length + 4) {
 		const uint8_t opcode = get_int<uint8_t>();
 		switch (opcode) {
-			case 0: { // DW_LNS_extended_op
+			case DW_LNS_extended_op: {
 				const uint64_t extended_opcode_length(get_uleb128());
 				const size_t offset_old(offset);
 				const uint8_t extended_opcode(get_int<uint8_t>());
 				switch (extended_opcode) {
-					case 1: // DW_LNE_end_sequence
+					case DW_LNE_end_sequence:
 						state_machine.end_sequence = true;
 						emit_state_machine(output);
 						reset_state_machine();
 						break;
-					case 2: // DW_LNE_set_address
+					case DW_LNE_set_address:
 						state_machine.address = get_int(extended_opcode_length - (offset - offset_old));
 						break;
-					case 4: // DW_LNE_set_discriminator
+					case DW_LNE_set_discriminator:
 						state_machine.discriminator = get_uleb128();
 						break;
 				}
 				offset = offset_old + extended_opcode_length;
 				break;
 			}
-			case 1: // DW_LNS_copy
+			case DW_LNS_copy:
 				emit_state_machine(output);
 				state_machine.basic_block = false;
 				break;
-			case 2: // DW_LNS_advance_pc
+			case DW_LNS_advance_pc:
 				state_machine.address += get_uleb128();
 				break;
-			case 3: // DW_LNS_advance_line
+			case DW_LNS_advance_line:
 				state_machine.line += get_sleb128();
 				break;
-			case 4: // DW_LNS_set_file
+			case DW_LNS_set_file:
 				state_machine.file = get_uleb128();
 				break;
-			case 5: // DW_LNS_set_column
+			case DW_LNS_set_column:
 				state_machine.column = get_uleb128();
 				break;
-			case 6: // DW_LNS_negate_stmt
+			case DW_LNS_negate_stmt:
 				state_machine.is_stmt = !state_machine.is_stmt;
 				break;
-			case 7: // DW_LNS_set_basic_block
+			case DW_LNS_set_basic_block:
 				state_machine.basic_block = true;
 				break;
-			case 8: // DW_LNS_const_add_pc
+			case DW_LNS_const_add_pc:
 				state_machine.address += (255 - opcode_base) / line_range;
 				break;
-			case 9: // DW_LNS_fixed_advance_pc
+			case DW_LNS_fixed_advance_pc:
 				state_machine.address += get_int<uint16_t>();
 				break;
 			default: {
