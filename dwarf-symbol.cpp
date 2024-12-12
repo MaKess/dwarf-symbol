@@ -62,6 +62,8 @@ class DwarfParser {
 		struct source_file {
 			const char *file_name;
 			const char *include_directory;
+			uint64_t time;
+			uint64_t size;
 		};
 		std::vector<struct source_file> file_names;
 
@@ -348,10 +350,15 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 		if (!*file_name)
 			break;
 		const uint64_t directory_index(get_uleb128());
-		static_cast<void>(get_uleb128()); // time
-		static_cast<void>(get_uleb128()); // size
+		const uint64_t time(get_uleb128());
+		const uint64_t size(get_uleb128());
 
-		source_file file = {file_name, directory_index ? include_directories[directory_index - 1] : NULL};
+		source_file file = {
+			file_name,
+			directory_index ? include_directories[directory_index - 1] : nullptr,
+			time,
+			size,
+		};
 		file_names.push_back(file);
 	}
 
