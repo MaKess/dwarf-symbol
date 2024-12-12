@@ -4,6 +4,9 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <stdexcept>
+
+#include <fmt/format.h>
 
 #include <inttypes.h>
 #include <string.h>
@@ -230,7 +233,7 @@ DwarfParser::DwarfParser(const void * const data, const size_t size) :
 const char * DwarfParser::get_data(size_t consume) {
 	const size_t new_offset(offset + consume);
 	if (new_offset > size)
-		fprintf(stderr, "ERROR! reading past end of buffer! (%zd >= %zd)\n", new_offset, size); // TODO: handle error
+		throw std::runtime_error(fmt::format("reading past end of buffer! ({} >= {})", new_offset, size));
 
 	const char * ret(static_cast<const char *>(data) + offset);
 	offset = new_offset;
@@ -279,7 +282,7 @@ const char * DwarfParser::get_string() {
 	const char *ret(get_data());
 	const size_t length(strlen(ret)), new_offset(offset + length + 1);
 	if (new_offset >= size)
-		fprintf(stderr, "ERROR! string is not properly null-terminated!\n"); // TODO: handle error
+		throw std::runtime_error("string is not properly null-terminated!");
 	offset = new_offset;
 	return ret;
 }
@@ -552,7 +555,7 @@ DebugInfo::~DebugInfo() {
 
 void DebugInfo::print_symbols() const {
 	for (std::map<uint64_t, Symbol>::const_iterator it(symbols.begin()); it != symbols.end(); ++it)
-		printf("%8" PRIx64 " (%3" PRId64 ") -> %s\n", it->first, it->second.size, it->second.name);
+		fmt::print("{:#x} ({}) -> {}\n", it->first, it->second.size, it->second.name);
 }
 
 bool DebugInfo::find_symbol(uint64_t address, const char **name, uint64_t *offset) const {
@@ -587,7 +590,7 @@ bool DebugInfo::find_line(uint64_t address, const char **file, const char **dire
 
 int main(int argc, const char *argv[]) {
 	if (argc < 2) {
-		fprintf(stderr, "usage: %s <file> [<address 1> [<address 2> [...]]]\n", argv[0]);
+		fmt::print("usage: {} <file> [<address 1> [<address 2> [...]]]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -599,13 +602,13 @@ int main(int argc, const char *argv[]) {
 			const uint64_t address = strtoull(argv[argi], NULL, 16);
 			const char *name, *file, *directory;
 			uint64_t offset, line, column;
-			printf("address: %" PRIx64 "\n", address);
+			fmt::print("address: {}\n", address);
 			if (debug_info.find_symbol(address, &name, &offset))
-				printf("label: %s\noffset: %" PRId64 "\n", name, offset);
+				fmt::print("label: {}\noffset: {}\n", name, offset);
 			else
-				printf("label not found\n");
+				fmt::print("label not found\n");
 			if (debug_info.find_line(address, &file, &directory, &line, &column))
-				printf("file: %s\ndirectory: %s\nline: %" PRId64 "\ncolumn: %" PRId64 "\n", file, directory, line, column);
+				fmt::print("file: {}\ndirectory: {}\nline: {}\ncolumn: {}\n", file, directory ?: "<none>", line, column);
 		}
 	} else {
 		debug_info.print_symbols();

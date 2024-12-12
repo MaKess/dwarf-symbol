@@ -10,4 +10,4 @@ test: dwarf-symbol
 	./$< $< 1337
 
 dwarf-symbol: dwarf-symbol.cpp
-	g++ -O2 -Wall -g -o $@ $^
+	g++ -O2 -Wall -g -o $@ $^ -lfmt
