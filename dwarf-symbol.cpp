@@ -47,7 +47,8 @@ class DwarfParser {
 		DwarfParser(const void * const data, const size_t size);
 		void parse(std::map<uint64_t, Line> &output);
 	private:
-		void dwarf2(std::map<uint64_t, Line> &output);
+		void parse_header();
+		void parse_state_machine(std::map<uint64_t, Line> &output);
 
 		const char * get_data(size_t consume=0);
 		template<typename T> T get_int();
@@ -65,23 +66,38 @@ class DwarfParser {
 			uint64_t time;
 			uint64_t size;
 		};
+		std::vector<const char *> include_directories;
 		std::vector<struct source_file> file_names;
 
 		struct {
 			uint64_t address;
+			uint64_t op_index; // DWARF4
 			uint64_t file;
 			uint64_t line;
 			uint64_t column;
-			uint64_t discriminator;
 			bool is_stmt;
 			bool basic_block;
 			bool end_sequence;
+			bool prologue_end; // DWARF3
+			bool epilogue_begin; // DWARF3
+			uint64_t isa; // DWARF3
+			uint64_t discriminator; // DWARF4
 		} state_machine;
 
 		struct {
-			uint32_t prologue_length;
+			uint64_t unit_end;
+			uint64_t header_end;
+
+			uint64_t unit_length;
 			uint16_t version;
+			uint64_t header_length;
+			uint8_t minimum_instruction_length;
+			uint8_t maximum_operations_per_instruction;
 			bool default_is_stmt;
+			int8_t line_base;
+			uint8_t line_range;
+			uint8_t opcode_base;
+			const uint8_t *standard_opcode_lengths;
 		} header;
 
 		const void * const data;
@@ -291,52 +307,46 @@ const char * DwarfParser::get_string() {
 
 void DwarfParser::parse(std::map<uint64_t, Line> &output) {
 	while (offset < size) {
-		const size_t offset_old(offset);
-		offset += 4;
-		const uint16_t version(get_int<uint16_t>());
-		offset = offset_old;
-		if (version == 2) {
-			dwarf2(output);
-		} else {
-			fprintf(stderr, "unsupported dwarf version %" PRIu16 "\n", version);
-			break;
-		}
+		parse_header();
+
+		if (offset != header.header_end)
+			throw std::runtime_error(fmt::format("offset is {}, but header should end at {}", offset, header.header_end));
+
+		parse_state_machine(output);
 	}
 }
 
-void DwarfParser::reset_state_machine() {
-	state_machine.address = 0;
-	state_machine.file = 1;
-	state_machine.line = 1;
-	state_machine.column = 0;
-	state_machine.is_stmt = header.default_is_stmt;
-	state_machine.basic_block = false;
-	state_machine.end_sequence = false;
-}
-
-void DwarfParser::emit_state_machine(std::map<uint64_t, Line> &output) {
-	Line line = {
-		state_machine.file ? file_names[state_machine.file - 1].file_name : NULL,
-		state_machine.file ? file_names[state_machine.file - 1].include_directory : NULL,
-		state_machine.line,
-		state_machine.column
-	};
-	output[state_machine.address] = line;
-}
-void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
-	const size_t offset_start(offset);
-	const uint32_t total_length(get_int<uint32_t>());
+void DwarfParser::parse_header() {
+	const uint32_t initial_length(get_int<uint32_t>());
+	const bool dwarf32_not_64 = initial_length < UINT32_C(0xffffff00);
+	header.unit_length = dwarf32_not_64 ? initial_length : get_int<uint64_t>();
+	header.unit_end = offset + header.unit_length;
 	header.version = get_int<uint16_t>();
-	header.prologue_length = get_int<uint32_t>();
-	const uint8_t minimum_instruction_length(get_int<uint8_t>());
-	header.default_is_stmt = get_int<uint8_t>();
-	const int8_t line_base(get_int<int8_t>());
-	const uint8_t line_range(get_int<uint8_t>());
-	const uint8_t opcode_base(get_int<uint8_t>());
-	// TODO: check if "opcode_base" is invalid (what is its minimum value?)
-	const uint8_t *standard_opcode_lengths(reinterpret_cast<const uint8_t *>(get_data(opcode_base - 1)));
 
-	std::vector<const char *> include_directories;
+	if (header.version < 2 || header.version > 4)
+		throw std::runtime_error(fmt::format("unsupported DWARF version {}", header.version));
+
+	header.header_length = dwarf32_not_64 ? get_int<uint32_t>() : get_int<uint64_t>();
+	header.header_end = offset + header.header_length;
+	header.minimum_instruction_length = get_int<uint8_t>();
+	if (header.version >= 4)
+		header.maximum_operations_per_instruction = get_int<uint8_t>();
+	else
+		header.maximum_operations_per_instruction = 1;
+
+	if (header.maximum_operations_per_instruction == 0)
+		throw std::runtime_error("maximum_operations_per_instruction must not be 0");
+	else if (header.maximum_operations_per_instruction != 1)
+		throw std::runtime_error("TODO: implement support for maximum_operations_per_instruction");
+
+	header.default_is_stmt = get_int<uint8_t>();
+	header.line_base = get_int<int8_t>();
+	header.line_range = get_int<uint8_t>();
+	header.opcode_base = get_int<uint8_t>();
+	// TODO: check if "opcode_base" is invalid (what is its minimum value?)
+	header.standard_opcode_lengths = reinterpret_cast<const uint8_t *>(get_data(header.opcode_base - 1));
+
+	include_directories.clear();
 	for (;;) {
 		const char * const include_directory(get_string());
 		if (!*include_directory)
@@ -362,9 +372,36 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 		file_names.push_back(file);
 	}
 
-	reset_state_machine();
+}
 
-	while (offset < offset_start + total_length + 4) {
+void DwarfParser::reset_state_machine() {
+	state_machine.address = 0;
+	state_machine.op_index = 0;
+	state_machine.file = 1;
+	state_machine.line = 1;
+	state_machine.column = 0;
+	state_machine.is_stmt = header.default_is_stmt;
+	state_machine.basic_block = false;
+	state_machine.end_sequence = false;
+	state_machine.prologue_end = false;
+	state_machine.epilogue_begin = false;
+	state_machine.isa = 0;
+	state_machine.discriminator = 0;
+}
+
+void DwarfParser::emit_state_machine(std::map<uint64_t, Line> &output) {
+	Line line = {
+		state_machine.file ? file_names[state_machine.file - 1].file_name : nullptr,
+		state_machine.file ? file_names[state_machine.file - 1].include_directory : nullptr,
+		state_machine.line,
+		state_machine.column
+	};
+	output[state_machine.address] = line;
+}
+
+void DwarfParser::parse_state_machine(std::map<uint64_t, Line> &output) {
+	reset_state_machine();
+	while (offset < header.unit_end) {
 		const uint8_t opcode = get_int<uint8_t>();
 		switch (opcode) {
 			case DW_LNS_extended_op: {
@@ -380,6 +417,20 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 					case DW_LNE_set_address:
 						state_machine.address = get_int(extended_opcode_length - (offset - offset_old));
 						break;
+					case DW_LNE_define_file: {
+						const char * file_name = get_string();
+						const uint64_t directory_index = get_uleb128();
+						const uint64_t time = get_uleb128();
+						const uint64_t size = get_uleb128();
+
+						source_file file = {
+							file_name,
+							directory_index ? include_directories[directory_index - 1] : nullptr,
+							time,
+							size,
+						};
+						file_names.push_back(file);
+					}
 					case DW_LNE_set_discriminator:
 						state_machine.discriminator = get_uleb128();
 						break;
@@ -390,9 +441,12 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 			case DW_LNS_copy:
 				emit_state_machine(output);
 				state_machine.basic_block = false;
+				state_machine.prologue_end = false;
+				state_machine.epilogue_begin = false;
+				state_machine.discriminator = 0;
 				break;
 			case DW_LNS_advance_pc:
-				state_machine.address += get_uleb128();
+				state_machine.address += get_uleb128() * header.minimum_instruction_length;
 				break;
 			case DW_LNS_advance_line:
 				state_machine.line += get_sleb128();
@@ -410,20 +464,33 @@ void DwarfParser::dwarf2(std::map<uint64_t, Line> &output) {
 				state_machine.basic_block = true;
 				break;
 			case DW_LNS_const_add_pc:
-				state_machine.address += (255 - opcode_base) / line_range;
+				state_machine.address += (255 - header.opcode_base) / header.line_range * header.minimum_instruction_length;
 				break;
 			case DW_LNS_fixed_advance_pc:
 				state_machine.address += get_int<uint16_t>();
 				break;
+			case DW_LNS_set_prologue_end:
+				state_machine.prologue_end = true;
+				break;
+			case DW_LNS_set_epilogue_begin:
+				state_machine.epilogue_begin = true;
+				break;
+			case DW_LNS_set_isa:
+				state_machine.isa = get_uleb128();
+				break;
 			default: {
-				if (opcode < opcode_base) {
-					static_cast<void>(get_data(standard_opcode_lengths[opcode - 1]));
+				if (opcode < header.opcode_base) {
+					static_cast<void>(get_data(header.standard_opcode_lengths[opcode - 1]));
 					break;
 				}
-				const uint8_t special_opcode(opcode - opcode_base);
-				state_machine.address += special_opcode / line_range * minimum_instruction_length;
-				state_machine.line += line_base + special_opcode % line_range;
+				const uint8_t special_opcode(opcode - header.opcode_base);
+				state_machine.address += special_opcode / header.line_range * header.minimum_instruction_length;
+				state_machine.line += header.line_base + special_opcode % header.line_range;
 				emit_state_machine(output);
+				state_machine.basic_block = false;
+				state_machine.prologue_end = false;
+				state_machine.epilogue_begin = false;
+				state_machine.discriminator = 0;
 				break;
 			}
 		}
