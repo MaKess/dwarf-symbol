@@ -488,7 +488,7 @@ const SectionHeader * ElfParser<ElfHeader, SectionHeader, SymbolEntry>::get_sect
 template<typename ElfHeader, typename SectionHeader, typename SymbolEntry>
 const SectionHeader * ElfParser<ElfHeader, SectionHeader, SymbolEntry>::get_section(const char * const section_name) const {
 	typename std::map<std::string, const SectionHeader *>::const_iterator it(sections.find(section_name));
-	return it == sections.end() ? NULL : it->second;
+	return it == sections.end() ? nullptr : it->second;
 }
 
 template<typename ElfHeader, typename SectionHeader, typename SymbolEntry>
@@ -498,8 +498,8 @@ T ElfParser<ElfHeader, SectionHeader, SymbolEntry>::get_section_content(const Se
 }
 
 DebugInfo::DebugInfo() :
-	data(NULL),
-	strbuf(NULL),
+	data(nullptr),
+	strbuf(nullptr),
 	size(0),
 	fd(-1) {
 }
@@ -518,7 +518,7 @@ bool DebugInfo::load(const char * const file_name) {
 	}
 	size = sb.st_size;
 
-	data = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+	data = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
 	if (data == MAP_FAILED) {
 		perror("mmap");
 		return true;
@@ -548,7 +548,7 @@ bool DebugInfo::load(const char * const file_name) {
 DebugInfo::~DebugInfo() {
 	if (data && data != MAP_FAILED) {
 		munmap(const_cast<void *>(data), size);
-		data = NULL;
+		data = nullptr;
 	}
 	if (fd >= 0) {
 		close(fd);
@@ -556,7 +556,7 @@ DebugInfo::~DebugInfo() {
 	}
 	if (strbuf) {
 		free(strbuf);
-		strbuf = NULL;
+		strbuf = nullptr;
 	}
 }
 
@@ -606,7 +606,7 @@ int main(int argc, const char *argv[]) {
 
 	if (argc >= 3) {
 		for (int argi(2); argi < argc; ++argi) {
-			const uint64_t address = strtoull(argv[argi], NULL, 16);
+			const uint64_t address = strtoull(argv[argi], nullptr, 16);
 			const char *name, *file, *directory;
 			uint64_t offset, line, column;
 			fmt::print("address: {}\n", address);
