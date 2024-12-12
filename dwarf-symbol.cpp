@@ -299,8 +299,8 @@ int64_t DwarfParser::get_sleb128() {
 const char * DwarfParser::get_string() {
 	const char *ret(get_data());
 	const size_t length(strlen(ret)), new_offset(offset + length + 1);
-	if (new_offset >= size)
-		throw std::runtime_error("string is not properly null-terminated!");
+	if (new_offset > size)
+		throw std::runtime_error(fmt::format("string starting at offset {:#x} is not properly null-terminated!", offset));
 	offset = new_offset;
 	return ret;
 }
