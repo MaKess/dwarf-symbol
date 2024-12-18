@@ -676,7 +676,7 @@ int main(int argc, const char *argv[]) {
 			const uint64_t address = strtoull(argv[argi], nullptr, 16);
 			const char *name, *file, *directory;
 			uint64_t offset, line, column;
-			fmt::print("address: {}\n", address);
+			fmt::print("address: {:#x}\n", address);
 			if (debug_info.find_symbol(address, &name, &offset))
 				fmt::print("label: {}\noffset: {}\n", name, offset);
 			else
